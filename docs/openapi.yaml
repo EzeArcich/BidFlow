@@ -1,0 +1,2018 @@
+openapi: 3.1.0
+info:
+  title: Bidflow API
+  version: 0.3.0
+  description: SaaS B2B genérico. RFQ, portal proveedor, ofertas parciales, evaluación, adjudicación distribuida
+    y órdenes. Dinero decimal ARS. Idempotency-Key en adjudicación; no aplica globalmente. Sin correo, pagos ni
+    logística.
+servers:
+- url: http://localhost:8080/api/v1
+security:
+- bearerAuth: []
+paths:
+  /auth/login:
+    post:
+      operationId: login
+      summary: Emitir token de usuario
+      tags:
+      - Autenticación
+      description: 'Sanctum Bearer: token con hash en DB y vigencia de 8 horas. Se muestra sólo al emitirlo. No
+        requiere membresía para autenticar. Límite 5 intentos/minuto por IP+email y 20 por IP. Sin registro público
+        ni refresh token.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    const: Bearer
+                  expires_at: &id008
+                    type: string
+                    format: date-time
+                    example: '2026-12-01T18:00:00Z'
+                  data:
+                    $ref: '#/components/schemas/User'
+                required:
+                - access_token
+                - token_type
+                - expires_at
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Login'
+      security: []
+  /auth/me:
+    get:
+      operationId: currentUser
+      summary: Consultar usuario y membresías
+      tags:
+      - Autenticación
+      description: ''
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/User'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Revocar sólo el token actual
+      tags:
+      - Autenticación
+      description: ''
+      responses:
+        '204':
+          description: Sin contenido
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /tenders:
+    get:
+      operationId: listTenders
+      summary: Listar RFQ propias
+      tags:
+      - RFQ
+      description: ' Requiere rfq:read; todos los roles pueden consultar.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Tender'
+                  links:
+                    type: object
+                  meta:
+                    type: object
+                    properties:
+                      current_page:
+                        type: integer
+                      per_page:
+                        type: integer
+                      total:
+                        type: integer
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - &id001
+        $ref: '#/components/parameters/Search'
+      - &id002
+        $ref: '#/components/parameters/PerPage'
+      - &id003
+        $ref: '#/components/parameters/Page'
+      - name: status
+        in: query
+        schema: &id007
+          type: string
+          enum:
+          - draft
+          - published
+          - closed
+          - partially_awarded
+          - awarded
+          - completed
+          - cancelled
+          - expired
+      - name: type
+        in: query
+        schema: &id006
+          type: string
+          enum:
+          - products
+          - services
+          - works
+          - parts
+          - repair
+    post:
+      operationId: createTender
+      summary: Crear borrador
+      tags:
+      - RFQ
+      description: Ítems e invitaciones se agregan con sus endpoints separados. Estado, creador y organización los
+        establece el servidor. Requiere rfq:read y rfq:write y rol owner/admin/operator.
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tender'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTender'
+  /tenders/{tender}:
+    get:
+      operationId: showTender
+      summary: Detalle de RFQ con ítems e invitaciones
+      tags:
+      - RFQ
+      description: ' Requiere rfq:read; todos los roles pueden consultar.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tender'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+    patch:
+      operationId: updateTender
+      summary: Editar borrador
+      tags:
+      - RFQ
+      description: Sólo draft. Un nuevo deadline sincroniza el vencimiento de sus invitaciones. Tipos legacy se
+        pueden consultar y editar sin convertirlos; la API sólo asigna tipos genéricos. Si la clasificación tiene
+        registros dependientes que impiden cambiarla retorna 409. Requiere rfq:read y rfq:write y rol owner/admin/operator.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tender'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTender'
+  /tenders/{tender}/items:
+    get:
+      operationId: listItems
+      summary: Listar ítems ordenados por posición
+      tags:
+      - RFQ
+      description: ' Requiere rfq:read; todos los roles pueden consultar.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Item'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+    post:
+      operationId: createItem
+      summary: Agregar ítem
+      tags:
+      - RFQ
+      description: Sólo draft. Si se omite position se asigna la siguiente libre al final. attributes contiene especificaciones
+        genéricas. Requiere rfq:read y rfq:write y rol owner/admin/operator.
+      responses:
+        '201':
+          description: Creado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateItem'
+  /tenders/{tender}/items/{item}:
+    patch:
+      operationId: updateItem
+      summary: Editar ítem
+      tags:
+      - RFQ
+      description: El ítem debe pertenecer a la RFQ de la ruta. Posiciones duplicadas retornan 422. Requiere rfq:read
+        y rfq:write y rol owner/admin/operator.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Item'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Item'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateItem'
+    delete:
+      operationId: deleteItem
+      summary: Eliminar ítem de borrador
+      tags:
+      - RFQ
+      description: Rechaza ítems referenciados por ofertas o adjuntos con 409. Requiere rfq:read y rfq:write y rol
+        owner/admin/operator.
+      responses:
+        '204':
+          description: Sin contenido
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Item'
+  /suppliers:
+    get:
+      operationId: listSuppliers
+      summary: Buscar proveedores disponibles
+      tags:
+      - Proveedores
+      description: Sólo proveedores y vínculos activos de la organización, sin filtro sectorial. Incluye contactos
+        y capacidades de la red compartida. Requiere rfq:read; todos los roles pueden consultar.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Supplier'
+                  links:
+                    type: object
+                  meta:
+                    type: object
+                    properties:
+                      current_page:
+                        type: integer
+                      per_page:
+                        type: integer
+                      total:
+                        type: integer
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - *id001
+      - *id002
+      - *id003
+  /tenders/{tender}/invitations:
+    get:
+      operationId: listInvitations
+      summary: Consultar invitaciones
+      tags:
+      - RFQ
+      description: ' Requiere rfq:read; todos los roles pueden consultar.'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invitation'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+    post:
+      operationId: inviteSuppliers
+      summary: Invitar proveedores
+      tags:
+      - RFQ
+      description: Sólo draft y deadline futuro. Un lote es atómico. Proveedor activo vinculado a la organización
+        y contacto opcional del mismo proveedor. Retorna 200 tanto al crear como al repetir; existentes permanecen
+        sin cambios, sin duplicar auditoría. Duplicados dentro del mismo lote son 422. No envía emails ni genera
+        tokens del portal. Requiere rfq:read y rfq:write y rol owner/admin/operator.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invitation'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteSuppliers'
+  /tenders/{tender}/publish:
+    post:
+      operationId: publishTender
+      summary: Publicar RFQ
+      tags:
+      - RFQ
+      description: Sólo draft. Exige deadline futuro, al menos un ítem y una invitación. Todas las invitaciones
+        deben estar pending, vigentes y asociadas a proveedores/vínculos activos. Transacción con lock de RFQ, historial,
+        auditoría y outbox. No envía comunicaciones. Repetir retorna 409 sin duplicar eventos. Requiere rfq:read
+        y rfq:write y rol owner/admin/operator.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tender'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/Tender'
+  /health:
+    get:
+      operationId: getHealth
+      summary: Liveness de aplicación
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    const: ok
+                  service:
+                    type: string
+                    const: bidflow
+                required:
+                - status
+                - service
+  /portal/auth/login:
+    post:
+      operationId: supplierLogin
+      summary: Autenticar identidad proveedor
+      tags:
+      - Portal proveedor
+      description: Cuenta separada del comprador. email/password; tokens Sanctum con hash, 8 horas. Sin registro
+        público. Credenciales incorrectas => 422; rate limit => 429.
+      parameters: []
+      responses:
+        '200':
+          description: Token proveedor
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token: &id004
+                    type: string
+                  token_type:
+                    const: Bearer
+                  expires_at:
+                    type: string
+                    format: date-time
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Demasiados intentos
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password: *id004
+              required:
+              - email
+              - password
+  /portal/auth/logout:
+    post:
+      operationId: supplierLogout
+      summary: Revocar token proveedor actual
+      tags:
+      - Portal proveedor
+      responses:
+        '204':
+          description: Revocado
+        '401':
+          description: No autenticado
+  /portal/invitations:
+    get:
+      operationId: supplierInvitations
+      summary: Invitaciones propias en organizaciones habilitadas
+      tags:
+      - Portal proveedor
+      description: ''
+      parameters: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PortalInvitation'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /portal/{organization}/invitations/{invitation}:
+    get:
+      operationId: supplierInvitation
+      summary: Solicitud y economía exclusivamente propia
+      tags:
+      - Portal proveedor
+      description: Valida identidad, proveedor, organización, vínculo e invitación. No expone ofertas ajenas ni
+        snapshot global de una adjudicación mixta.
+      parameters:
+      - $ref: '#/components/parameters/Portalorganization'
+      - $ref: '#/components/parameters/Portalinvitation'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PortalDetail'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /portal/{organization}/invitations/{invitation}/bid:
+    put:
+      operationId: saveSupplierBid
+      summary: Crear o reemplazar borrador parcial
+      tags:
+      - Portal proveedor
+      description: Una oferta por proveedor/RFQ. Sólo published y deadlines futuros. Las líneas reemplazan íntegramente
+        el borrador. Moneda ARS de Tender. Cantidad <= solicitada. Subtotal half-up a 2 decimales; total suma subtotales.
+      parameters:
+      - $ref: '#/components/parameters/Portalorganization'
+      - $ref: '#/components/parameters/Portalinvitation'
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Bid'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '200':
+          description: 'Reintento: mismo recurso, sin duplicar efectos'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Bid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveBid'
+  /portal/{organization}/invitations/{invitation}/bid/submit:
+    post:
+      operationId: submitSupplierBid
+      summary: Presentar borrador y congelar snapshot
+      tags:
+      - Portal proveedor
+      description: Sin body. Exige borrador guardado con líneas. Reintentar presentación retorna la misma oferta,
+        sin duplicar auditoría; no permite editar una oferta presentada.
+      parameters:
+      - $ref: '#/components/parameters/Portalorganization'
+      - $ref: '#/components/parameters/Portalinvitation'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Bid'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /tenders/{tender}/evaluation:
+    get:
+      operationId: evaluateTender
+      summary: Comparativa por ítem y proveedor
+      tags:
+      - Evaluación y adjudicación
+      description: Sólo ofertas presentadas/aceptadas. Incluye pendientes y disponibilidad ofertada. Viewer puede
+        consultar.
+      parameters:
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Evaluation'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /tenders/{tender}/bids:
+    get:
+      operationId: compareTenderBids
+      summary: Alias de matriz comparativa
+      tags:
+      - Evaluación y adjudicación
+      description: ''
+      parameters:
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Evaluation'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /tenders/{tender}/close:
+    post:
+      operationId: closeTender
+      summary: Cerrar recepción e iniciar evaluación
+      tags:
+      - Evaluación y adjudicación
+      description: Owner/admin/operator; published -> closed. Sin body. No abre recepción nuevamente. Repetir closed
+        retorna el mismo estado.
+      parameters:
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Tender'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /tenders/{tender}/awards:
+    get:
+      operationId: listAwards
+      summary: Historial de adjudicaciones
+      tags:
+      - Evaluación y adjudicación
+      description: ''
+      parameters:
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Award'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      operationId: allocateAward
+      summary: Adjudicar cantidades a múltiples proveedores
+      tags:
+      - Evaluación y adjudicación
+      description: 'Sólo closed/partially_awarded, rol de escritura. Tender bloqueado en transacción. Límites acumulados
+        por solicitado y ofertado. Precio adjudicado explícito; snapshots inmutables. Una orden por proveedor/operación.
+        partially_awarded si quedan pendientes, awarded si todos llegan a cero. Misma clave y payload: mismo recurso;
+        payload distinto: 409. Rollback completo ante error.'
+      parameters:
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Organization'
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          maxLength: 100
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Award'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '200':
+          description: 'Reintento: mismo recurso, sin duplicar efectos'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Award'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AllocateAward'
+  /tenders/{tender}/work-orders:
+    get:
+      operationId: listWorkOrders
+      summary: Órdenes por proveedor
+      tags:
+      - Evaluación y adjudicación
+      description: ''
+      parameters:
+      - $ref: '#/components/parameters/Tender'
+      - $ref: '#/components/parameters/Organization'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkOrder'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /work-orders/{workOrder}:
+    get:
+      operationId: showWorkOrder
+      summary: Detalle básico de orden
+      tags:
+      - Evaluación y adjudicación
+      description: ''
+      parameters:
+      - $ref: '#/components/parameters/Organization'
+      - $ref: '#/components/parameters/PortalworkOrder'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/WorkOrder'
+        '401':
+          description: Sin autenticación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          description: Cuenta o rol sin permiso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Recurso ajeno o inexistente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Estado incompatible o clave reutilizada con otros datos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Validación o capacidad insuficiente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Token Sanctum obtenido de POST /auth/login. Caduca a las 8 horas y se revoca con /auth/logout.
+  parameters:
+    Organization:
+      name: X-Organization-ID
+      in: header
+      required: false
+      description: Selector de organización. Se valida la membresía autenticada y estado activo. Obligatorio si
+        el usuario pertenece a más de una organización activa. Nunca se toma organization_id del body como autorización.
+      schema: &id005
+        type: string
+        pattern: ^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$
+        example: 01M6S46AMG6NY6YXMJV6FADVK1
+    Tender:
+      name: tender
+      in: path
+      required: true
+      schema: *id005
+    Item:
+      name: item
+      in: path
+      required: true
+      schema: *id005
+    Search:
+      name: q
+      in: query
+      schema:
+        type: string
+        maxLength: 200
+      description: Busca por título de RFQ o nombre legal/comercial de proveedor (ILIKE).
+    PerPage:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    Portalorganization:
+      name: organization
+      in: path
+      required: true
+      schema: *id004
+    Portalinvitation:
+      name: invitation
+      in: path
+      required: true
+      schema: *id004
+    PortalworkOrder:
+      name: workOrder
+      in: path
+      required: true
+      schema: *id004
+  responses:
+    Unauthorized:
+      description: Token ausente, inválido, expirado o credenciales incorrectas.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Token ausente, inválido, expirado o credenciales incorrectas.
+    Forbidden:
+      description: Sin membresía activa, rol o capacidad de token requerida.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Sin membresía activa, rol o capacidad de token requerida.
+    NotFound:
+      description: Recurso inexistente, de otra organización o ítem de otra licitación.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Recurso inexistente, de otra organización o ítem de otra licitación.
+    Conflict:
+      description: La licitación no es un borrador o el ítem tiene dependencias.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: La licitación no es un borrador o el ítem tiene dependencias.
+    ValidationError:
+      description: Payload o precondiciones inválidos; incluye errors por campo.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: The given data was invalid.
+            errors:
+              items:
+              - Add at least one item before publication.
+    RateLimited:
+      description: Límite de intentos de login alcanzado; respetar Retry-After.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Límite de intentos de login alcanzado; respetar Retry-After.
+  schemas:
+    Tender:
+      type: object
+      properties:
+        id: *id005
+        organization_id: *id005
+        type: *id006
+        status: *id007
+        title:
+          type: string
+          maxLength: 255
+        description: &id009
+          type:
+          - string
+          - 'null'
+        currency:
+          type: string
+          const: ARS
+        deadline_at: *id008
+        conditions: &id010
+          type:
+          - object
+          - array
+          - 'null'
+          description: Especificaciones o condiciones JSON, máximo 100 elementos en el primer nivel.
+          maxProperties: 100
+          maxItems: 100
+        source_system: *id009
+        external_reference: *id009
+        created_by: *id005
+        is_demo:
+          type: boolean
+        created_at: *id008
+        updated_at: *id008
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Item'
+        invitations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Invitation'
+      required:
+      - id
+      - organization_id
+      - type
+      - status
+      - title
+      - currency
+      - deadline_at
+    Item:
+      type: object
+      properties:
+        id: *id005
+        tender_id: *id005
+        position:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        unit:
+          type: string
+        quantity:
+          type: string
+          pattern: ^\d+\.\d{3}$
+          example: '1.250'
+        attributes: *id010
+        reference_code: *id009
+        notes: *id009
+      required:
+      - id
+      - tender_id
+      - position
+      - description
+      - unit
+      - quantity
+    Invitation:
+      type: object
+      properties:
+        id: *id005
+        tender_id: *id005
+        supplier_id: *id005
+        contact_id:
+          anyOf:
+          - *id005
+          - type: 'null'
+        status:
+          type: string
+          enum:
+          - pending
+          - sent
+          - viewed
+          - responded
+          - declined
+          - expired
+          - revoked
+        expires_at: *id008
+        sent_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+      required:
+      - id
+      - tender_id
+      - supplier_id
+      - status
+      - expires_at
+    Supplier:
+      type: object
+      properties:
+        id: *id005
+        type:
+          type: string
+          enum:
+          - vendor
+          - contractor
+          - parts
+          - workshop
+          - mixed
+        legal_name:
+          type: string
+        trade_name:
+          type: string
+        is_demo:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+        contacts:
+          type: array
+          items:
+            type: object
+            properties:
+              id: *id005
+              name:
+                type: string
+              email:
+                type: string
+                format: email
+            required:
+            - id
+            - name
+            - email
+      required:
+      - id
+      - type
+      - legal_name
+      - trade_name
+    User:
+      type: object
+      properties:
+        id: *id005
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        organizations:
+          type: array
+          items:
+            type: object
+            properties:
+              id: *id005
+              name:
+                type: string
+              role:
+                type: string
+                enum:
+                - owner
+                - admin
+                - operator
+                - viewer
+              status:
+                type: string
+                enum:
+                - active
+                - inactive
+            required:
+            - id
+            - name
+            - role
+            - status
+      required:
+      - id
+      - name
+      - email
+      - organizations
+    Error:
+      type: object
+      properties:
+        message:
+          type: string
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      required:
+      - message
+    Login:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        password:
+          type: string
+          maxLength: 1024
+          writeOnly: true
+        device_name:
+          type: string
+          maxLength: 100
+      required:
+      - email
+      - password
+      - device_name
+    CreateTender:
+      type: object
+      properties: &id011
+        id: false
+        organization_id: false
+        created_by: false
+        status: false
+        is_demo: false
+        repair_scope: false
+        tender_id: false
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        type:
+          type: string
+          enum:
+          - products
+          - services
+          - works
+        description:
+          type:
+          - string
+          - 'null'
+          maxLength: 10000
+        currency:
+          type: string
+          const: ARS
+          default: ARS
+        deadline_at:
+          type: string
+          format: date-time
+          example: '2026-12-01T18:00:00Z'
+          description: Fecha ISO8601 futura, con Z u offset explícito; se normaliza a UTC.
+        conditions: *id010
+        source_system:
+          type:
+          - string
+          - 'null'
+          maxLength: 255
+        external_reference:
+          type:
+          - string
+          - 'null'
+          maxLength: 255
+        items: false
+      required:
+      - title
+      - type
+      - deadline_at
+    UpdateTender:
+      type: object
+      properties: *id011
+    CreateItem:
+      type: object
+      properties: &id012
+        id: false
+        organization_id: false
+        created_by: false
+        status: false
+        is_demo: false
+        repair_scope: false
+        tender_id: false
+        description:
+          type: string
+          minLength: 1
+          maxLength: 10000
+        unit:
+          type: string
+          minLength: 1
+          maxLength: 50
+        quantity:
+          type: string
+          pattern: ^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,3})?$
+          description: Decimal positivo como string; máximo 9 enteros y 3 decimales. No se aceptan números JSON
+            ni cero.
+          example: '1.250'
+          not:
+            pattern: ^0(?:\.0+)?$
+        position:
+          type: integer
+          minimum: 1
+          maximum: 2147483647
+        attributes: *id010
+        reference_code:
+          type:
+          - string
+          - 'null'
+          maxLength: 255
+        notes:
+          type:
+          - string
+          - 'null'
+          maxLength: 10000
+      required:
+      - description
+      - unit
+      - quantity
+    UpdateItem:
+      type: object
+      properties: *id012
+    InviteSuppliers:
+      type: object
+      properties:
+        id: false
+        organization_id: false
+        created_by: false
+        status: false
+        is_demo: false
+        repair_scope: false
+        tender_id: false
+        invitations:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: supplier_id debe ser distinto dentro de un mismo lote.
+          items:
+            type: object
+            properties:
+              supplier_id: *id005
+              contact_id:
+                anyOf:
+                - *id005
+                - type: 'null'
+            required:
+            - supplier_id
+            additionalProperties: false
+      required:
+      - invitations
+    SaveBid:
+      type: object
+      properties:
+        currency:
+          type: string
+          enum:
+          - ARS
+        conditions:
+          type:
+          - string
+          - 'null'
+        warranty:
+          type:
+          - string
+          - 'null'
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            properties:
+              tender_item_id: *id004
+              quantity: &id014
+                type: string
+                pattern: ^(?:0|[1-9][0-9]{0,8})(?:\.[0-9]{1,3})?$
+                example: '60.000'
+                description: Decimal positivo; hasta 9 enteros y 3 decimales.
+              unit_price: &id013
+                type: string
+                pattern: ^(?:0|[1-9][0-9]{0,12})(?:\.[0-9]{1,2})?$
+                example: '1000.00'
+              delivery_days: &id015
+                type:
+                - integer
+                - 'null'
+                minimum: 0
+                maximum: 3650
+              conditions: &id016
+                type:
+                - string
+                - 'null'
+                maxLength: 10000
+              notes: &id017
+                type:
+                - string
+                - 'null'
+                maxLength: 10000
+            required:
+            - tender_item_id
+            - quantity
+            - unit_price
+            additionalProperties: false
+      required:
+      - lines
+    Bid:
+      type: object
+      properties:
+        id: *id004
+        tender_id: *id004
+        supplier_id: *id004
+        invitation_id: *id004
+        status:
+          type: string
+          enum:
+          - draft
+          - submitted
+          - accepted
+          - rejected
+        currency:
+          const: ARS
+        total_amount: *id013
+        conditions:
+          type:
+          - string
+          - 'null'
+        warranty:
+          type:
+          - string
+          - 'null'
+        submitted_snapshot:
+          type:
+          - object
+          - 'null'
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              id: *id004
+              tender_item_id: *id004
+              quantity: *id014
+              unit_price: *id013
+              delivery_days: *id015
+              conditions: *id016
+              notes: *id017
+              description: *id004
+              subtotal: *id013
+    AllocateAward:
+      type: object
+      properties:
+        request_key:
+          type: string
+          maxLength: 100
+          description: Alternativa al header Idempotency-Key; si se envía header tiene prioridad.
+        reason:
+          type: string
+          maxLength: 10000
+        lines:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            type: object
+            properties:
+              bid_item_id: *id004
+              quantity: *id014
+              unit_price: *id013
+              notes:
+                type:
+                - string
+                - 'null'
+            required:
+            - bid_item_id
+            - quantity
+            - unit_price
+      required:
+      - request_key
+      - reason
+      - lines
+    AwardLine:
+      type: object
+      properties:
+        id: *id004
+        bid_id: *id004
+        bid_item_id: *id004
+        tender_item_id: *id004
+        supplier_id: *id004
+        quantity: *id014
+        unit_price: *id013
+        subtotal: *id013
+        currency:
+          const: ARS
+        snapshot:
+          type: object
+        notes:
+          type:
+          - string
+          - 'null'
+    WorkOrder:
+      type: object
+      properties:
+        id: *id004
+        number: *id004
+        award_id: *id004
+        tender_id: *id004
+        supplier_id: *id004
+        status: *id004
+        total_amount: *id013
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              id: *id004
+              award_line_id: *id004
+              quantity: *id014
+              unit_price: *id013
+              subtotal: *id013
+              currency:
+                const: ARS
+              snapshot:
+                type: object
+    Award:
+      type: object
+      properties:
+        id: *id004
+        tender_id: *id004
+        status:
+          const: confirmed
+        currency:
+          const: ARS
+        total_amount: *id013
+        reason: *id004
+        awarded_by: *id004
+        awarded_at:
+          type: string
+          format: date-time
+        snapshot:
+          type: object
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/AwardLine'
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkOrder'
+    Evaluation:
+      type: object
+      properties:
+        tender_id: *id004
+        status: *id004
+        currency:
+          const: ARS
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              id: *id004
+              description: *id004
+              unit: *id004
+              requested_quantity: *id014
+              awarded_quantity: *id004
+              pending_quantity: *id004
+              quotes:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    bid_id: *id004
+                    bid_item_id: *id004
+                    supplier_id: *id004
+                    supplier_name: *id004
+                    quantity: *id014
+                    unit_price: *id013
+                    subtotal: *id013
+                    delivery_days:
+                      type:
+                      - integer
+                      - 'null'
+                    conditions:
+                      type:
+                      - string
+                      - 'null'
+                    notes:
+                      type:
+                      - string
+                      - 'null'
+                    awarded_quantity: *id004
+                    available_quantity: *id004
+        bids:
+          type: array
+          items:
+            type: object
+            properties:
+              id: *id004
+              supplier_id: *id004
+              supplier_name: *id004
+              total_amount: *id013
+              quoted_items:
+                type: integer
+              partial:
+                type: boolean
+    PortalInvitation:
+      type: object
+      properties:
+        organization_id: *id004
+        organization_name: *id004
+        id: *id004
+        status: *id004
+        tender_title: *id004
+        tender_status: *id004
+        deadline_at:
+          type: string
+          format: date-time
+    PortalDetail:
+      type: object
+      properties:
+        invitation_id: *id004
+        tender_id: *id004
+        title: *id004
+        description:
+          type:
+          - string
+          - 'null'
+        conditions:
+          type:
+          - object
+          - 'null'
+        currency:
+          const: ARS
+        status: *id004
+        deadline_at:
+          type: string
+          format: date-time
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Item'
+        bid:
+          anyOf:
+          - $ref: '#/components/schemas/Bid'
+          - type: 'null'
+        awards:
+          type: array
+          items:
+            $ref: '#/components/schemas/AwardLine'
+        orders:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkOrder'

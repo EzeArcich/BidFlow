@@ -1,0 +1,14 @@
+{
+  "Only draft tenders can be modified or published.": "Sólo se pueden modificar o publicar licitaciones en borrador.",
+  "This classification has dependent records and cannot be changed.": "Esta categoría tiene datos vinculados y no se puede cambiar.",
+  "This item has dependent records.": "Este ítem tiene ofertas o archivos vinculados y no puede eliminarse.",
+  "This position is already used in this tender.": "Esta posición ya está ocupada por otro ítem.",
+  "Quantity must be positive.": "La cantidad debe ser mayor que cero.",
+  "Set a future deadline before inviting suppliers.": "Elegí una fecha límite futura antes de invitar proveedores.",
+  "Select an active supplier linked to this organization.": "Elegí un proveedor activo y habilitado para esta organización.",
+  "Select a contact belonging to this supplier.": "Elegí un contacto que pertenezca al proveedor.",
+  "Publication requires a future deadline.": "La publicación requiere una fecha límite futura.",
+  "Add at least one item before publication.": "Agregá al menos un ítem antes de publicar.",
+  "Invite at least one supplier before publication.": "Invitá al menos un proveedor antes de publicar.",
+  "Every invitation must be pending, current, and linked to an active supplier.": "Todas las invitaciones deben estar pendientes y vigentes, con proveedores y vínculos activos."
+}
