@@ -28,3 +28,9 @@ Thumbs.db
 
 /.env.testing
 /.phpunit.cache
+
+# Guías y decisiones técnicas: copias locales, sin seguimiento en Git.
+*.[mM][dD]
+*.[mM][dD][xX]
+/docs.mc
+!/README.md

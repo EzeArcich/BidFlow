@@ -16,7 +16,7 @@ Plataforma SaaS B2B para gestionar licitaciones, comparar ofertas y distribuir c
 [![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE)
 
-[Inicio rápido](#inicio-rápido) · [Funcionalidades](#funcionalidades) · [Documentación](#documentación) · [API REST](docs/openapi.yaml)
+[Inicio rápido](#inicio-rápido) · [Funcionalidades](#funcionalidades) · [API y documentación](#api-y-documentación) · [API REST](docs/openapi.yaml)
 
 </div>
 
@@ -130,7 +130,7 @@ Las cuatro cuentas usan la contraseña elegida al ejecutar el comando. **No exis
 | Salud de la API | http://localhost:8080/api/v1/health |
 | Mailpit | http://localhost:8025 |
 
-Para recorrer el flujo completo, ingresar como proveedor y presentar una oferta. Luego, como comprador, abrir **Ofertas y adjudicaciones** desde el detalle de la licitación para comparar, cerrar recepción y distribuir cantidades. La [guía funcional](docs/phase-3.md) detalla cada paso.
+Para recorrer el flujo completo, ingresar como proveedor y presentar una oferta. Luego, como comprador, abrir **Ofertas y adjudicaciones** desde el detalle de la licitación para comparar, cerrar recepción y distribuir cantidades.
 
 ### Actualizar una instalación existente
 
@@ -162,10 +162,6 @@ Los roles `owner`, `admin` y `operator` pueden operar; `viewer` tiene acceso de 
 | [OpenAPI](docs/openapi.yaml) | Endpoints, autenticación, payloads, respuestas y errores. |
 | [Postman: licitaciones](docs/postman/Bidflow-phase-2.postman_collection.json) | Creación, ítems, invitaciones y publicación. |
 | [Postman: ofertas y adjudicaciones](docs/postman/Bidflow-phase-3.postman_collection.json) | Portal, ofertas, comparación, adjudicación y órdenes. |
-| [Guía de ofertas y adjudicación](docs/phase-3.md) | Flujo de navegador, permisos, reglas de cantidades y concurrencia. |
-| [Desarrollo local](docs/local-development.md) | Configuración, autenticación, Tinker, demo heredada y desarrollo sin Docker. |
-| [Especificación técnica](docs.mc) | Alcance y evolución del proyecto. |
-| [Decisiones de arquitectura](docs/decisions/) | Fundamentos y decisiones por etapa. |
 
 ## Pruebas y calidad
 
@@ -179,7 +175,7 @@ La suite cubre autenticación, autorización, aislamiento multiempresa, flujos w
 
 **Última validación registrada: 128 tests y 1074 assertions**, con Pint y Composer correctos. También se verificó el flujo en Chromium con sesiones y CSRF reales, en escritorio y móvil. Esa validación utilizó PostgreSQL 14 aislado; Compose y CI están configurados con PostgreSQL 17.
 
-Las pruebas exigen una base dedicada cuyo nombre termine en `_testing`. La configuración de inicio crea `bidflow_testing` al inicializar un volumen nuevo; para entornos existentes, consultar la [guía local](docs/local-development.md).
+Las pruebas exigen una base dedicada cuyo nombre termine en `_testing`. La configuración de inicio crea `bidflow_testing` al inicializar un volumen nuevo. Si un entorno existente no tiene esa base, crearla con `docker compose exec postgres createdb -U bidflow bidflow_testing`.
 
 ## Estado y próximos pasos
 
@@ -197,7 +193,7 @@ El MVP no incluye pagos, facturación, logística ni selección automática de p
 
 ## Contribuir
 
-Las mejoras, reportes de errores y propuestas son bienvenidos. Antes de cambiar reglas de dominio, revisar la [especificación](docs.mc), las [decisiones de arquitectura](docs/decisions/) y las instrucciones de [AGENTS.md](AGENTS.md).
+Las mejoras, reportes de errores y propuestas son bienvenidos. Los cambios deben respetar el aislamiento por organización, las reglas de cantidades y los contratos de la API descritos en este README y en OpenAPI.
 
 Para proponer un cambio, describir el problema y su solución, agregar pruebas cuando corresponda y ejecutar la suite y Pint. Los ejemplos deben usar datos ficticios; las credenciales y archivos `.env` locales no se versionan.
 
